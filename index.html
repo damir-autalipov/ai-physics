@@ -395,63 +395,96 @@ function loadExample(){
    ----------------------------- */
 
 function runAnalysis(){
-  const x=parseSeries(document.getElementById('inputA').value);
-  const y=parseSeries(document.getElementById('inputB').value);
-  if(x.length!==y.length||x.length<2){alert('Введите одинаковое количество точек');return;}
-
-  // линейная аппроксимация
-  const meanX=math.mean(x), meanY=math.mean(y);
-  const a=math.sum(x.map((xi,i)=>(xi-meanX)*(y[i]-meanY)))/math.sum(x.map(xi=>(xi-meanX)**2));
-  const b=meanY - a*meanX;
-  const y_pred=x.map(xi=>a*xi+b);
-  const r2val=r2(y,y_pred);
-
-  // определяем переменные и формулу
-  let symbols={x:'x',y:'y'};
-  let theoryY=[], theoryText='', empFormula='', compareText='';
-
-  if(mode==='ohm'){
-    symbols={x:'U',y:'I'};
-    const R=Math.abs(1/a);
-    theoryY=x.map(u=>u/R);
-    theoryText=`I = U / R, оценка R ≈ ${R.toFixed(3)} Ω`;
-    empFormula=`I = ${a.toFixed(3)}·U ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
-  } else if(mode==='pendulum'){
-    symbols={x:'L',y:'T'};
-    const g=Math.abs(4*Math.PI**2*a);
-    theoryY=x.map(L=>2*Math.PI*Math.sqrt(L/g));
-    theoryText=`T = 2π√(L/g), оценка g ≈ ${g.toFixed(2)} м/с²`;
-    empFormula=`T = ${a.toFixed(3)}·L ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
-  } else if(mode==='fall'){
-    symbols={x:'t',y:'h'};
-    const g=Math.abs(2*a);
-    theoryY=x.map(t=>0.5*g*t**2);
-    theoryText=`h = ½·g·t², оценка g ≈ ${g.toFixed(2)} м/с²`;
-    empFormula=`h = ${a.toFixed(3)}·t ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
-  } else {
-    empFormula=`y = ${a.toFixed(3)}·x ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+  const A = parseSeries(document.getElementById('inputA').value);
+  const B = parseSeries(document.getElementById('inputB').value);
+  if(A.length !== B.length || A.length < 2){
+    alert('Введите одинаковое количество точек (минимум две)');
+    return;
   }
 
-  // погрешность
-  const avgError = theoryY.length ? err(y, theoryY) : null;
+  const x = A.slice();
+  const y = B.slice();
 
-  // график
-  Plotly.newPlot('plot',[
-    {x,y,mode:'markers',name:'Эксперимент'},
-    {x,y:y_pred,mode:'lines',name:'Эмпирическая'},
-    theoryY.length?{x,y:theoryY,mode:'lines',name:'Теоретическая',line:{dash:'dot'}}:null
-  ].filter(Boolean),{
-    title:`Сравнение экспериментальных и теоретических данных (${symbols.y} от ${symbols.x})`,
-    margin:{t:40}
+  // --- линейная аппроксимация (простая, как для R, g и т.д.)
+  const meanX = math.mean(x);
+  const meanY = math.mean(y);
+  const num = math.sum(x.map((xi,i)=>(xi-meanX)*(y[i]-meanY)));
+  const den = math.sum(x.map(xi=>(xi-meanX)**2));
+  const a = den === 0 ? 0 : num/den;
+  const b = meanY - a*meanX;
+  const y_pred = x.map(xi => a*xi + b);
+
+  // функции для R² и ошибки
+  function r2score(y, ypred){
+    const meanY = math.mean(y);
+    const ssRes = math.sum(y.map((yi,i)=> (yi-ypred[i])**2));
+    const ssTot = math.sum(y.map(yi => (yi-meanY)**2));
+    return ssTot === 0 ? 1 : 1 - ssRes/ssTot;
+  }
+  function meanRelativeErrorPercent(y, ypred){
+    const eps = 1e-9;
+    const rel = y.map((yi,i)=> Math.abs(yi - ypred[i]) / Math.max(Math.abs(yi), eps));
+    return math.mean(rel) * 100;
+  }
+
+  const r2val = r2score(y, y_pred);
+  let empFormula = '';
+  let theoryY = [];
+  let theoryText = '';
+  let symbols = {x:'x', y:'y'};
+
+  // --- формулы по типу эксперимента ---
+  if(mode === 'ohm'){
+    symbols = {x:'U', y:'I'};
+    const R = Math.abs(1 / a);
+    empFormula = `I = ${a.toFixed(3)}·U ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+    theoryText = `I = U / R, оценка R ≈ ${R.toFixed(3)} Ω`;
+    theoryY = x.map(U => U / R);
+  }
+  else if(mode === 'pendulum'){
+    symbols = {x:'L', y:'T'};
+    const g = Math.abs((4 * Math.PI ** 2) / a);
+    empFormula = `T² = ${a.toFixed(3)}·L ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+    theoryText = `T = 2π√(L/g), оценка g ≈ ${g.toFixed(3)} м/с²`;
+    theoryY = x.map(L => 2*Math.PI*Math.sqrt(L/g));
+  }
+  else if(mode === 'fall'){
+    symbols = {x:'t', y:'h'};
+    const g = Math.abs(2 * a);
+    empFormula = `h = ${a.toFixed(3)}·t² ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+    theoryText = `h = ½·g·t², оценка g ≈ ${g.toFixed(3)} м/с²`;
+    theoryY = x.map(t => 0.5 * g * t * t);
+  }
+  else {
+    empFormula = `y = ${a.toFixed(3)}·x ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+  }
+
+  const avgError = theoryY.length ? meanRelativeErrorPercent(y, theoryY) : null;
+
+  // --- построение графика ---
+  const traces = [
+    {x, y, mode:'markers', name:'Эксперимент', marker:{size:7}},
+    {x, y:y_pred, mode:'lines', name:'Эмпирическая модель', line:{width:3, color:'#2563eb'}}
+  ];
+
+  if(theoryY.length){
+    traces.push({x, y:theoryY, mode:'lines', name:'Теоретическая модель', line:{width:3, dash:'dot', color:'#f97316'}});
+  }
+
+  Plotly.newPlot('plot', traces, {
+    margin:{t:30, l:60, r:20, b:60},
+    xaxis:{title:symbols.x},
+    yaxis:{title:symbols.y},
+    legend:{orientation:'h'}
   });
 
-  // вывод текста
-  document.getElementById('bestModelName').textContent='Эмпирическая модель';
-  document.getElementById('bestModelFormulaText').textContent=empFormula;
-  document.getElementById('theoryLatex').innerText=theoryText;
-  document.getElementById('pillR2').textContent='R² = '+r2val.toFixed(4);
-  document.getElementById('pillError').textContent='Δ% = '+(avgError?avgError.toFixed(2):'—');
-  document.getElementById('modelDetails').innerText=`Средняя относительная погрешность: ${(avgError?avgError.toFixed(2):'—')}%`;
+  // --- вывод текста и чисел ---
+  document.getElementById('bestModelName').textContent = 'Эмпирическая модель';
+  document.getElementById('bestModelFormulaText').textContent = empFormula;
+  document.getElementById('theoryLatex').innerText = theoryText;
+  document.getElementById('pillR2').textContent = 'R² = ' + r2val.toFixed(4);
+  document.getElementById('pillError').textContent = 'Δ% = ' + (avgError ? avgError.toFixed(2) + '%' : '—');
+  document.getElementById('modelDetails').innerText = `Средняя относительная погрешность: ${(avgError ? avgError.toFixed(2) : '—')}%`;
 }
 
 
@@ -566,5 +599,6 @@ loadExample();
 </script>
 </body>
 </html>
+
 
 
