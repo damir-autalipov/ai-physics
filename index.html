@@ -1,5 +1,12 @@
 <!DOCTYPE html>
 <html lang="ru">
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+  svg: { fontCache: 'global' }
+};
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -302,39 +309,39 @@ function prettyFormula(obj){
 
 function fitTheoryForMode(mode, x, y){
   if(mode==='ohm'){
-    // Theory: I = U / R  -> I = (1/R)*U  -> linear through origin ideally: I ~ a*U  where a = 1/R
-    // Fit linear with intercept (in case small offset)
-    const M = fitLinear(x,y); // I = a*U + b
+    // Закон Ома: I = U / R
+    const M = fitLinear(x,y); 
     const a = M.coeffs[0];
     const b = M.coeffs[1];
-    const R = Math.abs(a) > 1e-12 ? 1 / a : Infinity;
-    const ytheory = x.map(xi => a*xi + b);
-    const latex = `I = \\dfrac{U}{R},\\ \\text{оценка } R \\approx ${isFinite(R)?R.toFixed(4):'∞'}`;
+    const R = Math.abs(a) > 1e-12 ? Math.abs(1 / a) : Infinity;
+    const ytheory = x.map(u => u / R);
+    const latex = `I = \\frac{U}{R},\\; R_{\\text{оценка}} \\approx ${isFinite(R)?R.toFixed(3):'∞'}\\,\\Omega`;
     return {ytheory, paramName:'R', paramValue:R, latex};
   } else if(mode==='pendulum'){
-    // Theory: T = 2π sqrt(L/g)  => T^2 = (4π^2 / g) * L
+    // Маятник: T = 2π√(L/g)
     const T2 = y.map(yi => yi*yi);
-    const M = fitLinear(x, T2); // T2 = s * L + b
+    const M = fitLinear(x, T2); 
     const s = M.coeffs[0];
     const b = M.coeffs[1];
-    const g = Math.abs(s) > 1e-12 ? (4*Math.PI*Math.PI) / s : Infinity;
-    const ytheory = x.map(xi => Math.sqrt(( (s*xi + b) ) )); // sqrt(s*L + b) approximate T (if b small)
-    const latex = `T = 2\\pi\\sqrt{\\dfrac{L}{g}},\\ \\text{оценка } g \\approx ${isFinite(g)?g.toFixed(4):'—'}`;
+    const g = Math.abs(s) > 1e-12 ? Math.abs((4*Math.PI*Math.PI) / s) : Infinity;
+    const ytheory = x.map(L => 2*Math.PI*Math.sqrt(L / g));
+    const latex = `T = 2\\pi\\sqrt{\\frac{L}{g}},\\; g_{\\text{оценка}} \\approx ${isFinite(g)?g.toFixed(3):'—'}\\,м/с^2`;
     return {ytheory, paramName:'g', paramValue:g, latex};
   } else if(mode==='fall'){
-    // Theory: h = 1/2 g t^2 -> linear fit h vs t^2
+    // Падение: h = ½ g t²
     const t2 = x.map(xi => xi*xi);
-    const M = fitLinear(t2, y); // h = s * t2 + b
+    const M = fitLinear(t2, y); 
     const s = M.coeffs[0];
     const b = M.coeffs[1];
-    const g = 2 * s;
-    const ytheory = x.map(xi => s * xi*xi + b);
-    const latex = `h = \\tfrac{1}{2} g t^{2},\\ \\text{оценка } g \\approx ${isFinite(g)?g.toFixed(4):'—'}`;
+    const g = Math.abs(2 * s);
+    const ytheory = x.map(t => 0.5 * g * t * t);
+    const latex = `h = \\frac{1}{2}gt^{2},\\; g_{\\text{оценка}} \\approx ${isFinite(g)?g.toFixed(3):'—'}\\,м/с^2`;
     return {ytheory, paramName:'g', paramValue:g, latex};
   } else {
     return null;
   }
 }
+
 
 /* -----------------------------
    Event handlers: CSV, example, analyze
@@ -568,3 +575,4 @@ loadExample();
 </script>
 </body>
 </html>
+
