@@ -394,75 +394,66 @@ function loadExample(){
    Main analyze function
    ----------------------------- */
 
-function runAnalysis(showAllModels=false){
-  const A = parseSeries(document.getElementById('inputA').value);
-  const B = parseSeries(document.getElementById('inputB').value);
-  const userFormula = document.getElementById('userFormula').value.trim();
-  if(A.length === 0 || B.length === 0) { alert('Введите оба ряда данных.'); return; }
-  if(A.length !== B.length) { alert('Длины рядов должны совпадать.'); return; }
-  if(A.length < 2) { alert('Нужно минимум 2 точки.'); return; }
+function runAnalysis(){
+  const x=parseSeries(document.getElementById('inputA').value);
+  const y=parseSeries(document.getElementById('inputB').value);
+  if(x.length!==y.length||x.length<2){alert('Введите одинаковое количество точек');return;}
 
-  const x = A.slice(), y = B.slice();
+  // линейная аппроксимация
+  const meanX=math.mean(x), meanY=math.mean(y);
+  const a=math.sum(x.map((xi,i)=>(xi-meanX)*(y[i]-meanY)))/math.sum(x.map(xi=>(xi-meanX)**2));
+  const b=meanY - a*meanX;
+  const y_pred=x.map(xi=>a*xi+b);
+  const r2val=r2(y,y_pred);
 
-  // Fit candidate models
-  const M_lin = fitLinear(x,y);
-  const M_quad = fitQuad(x,y);
-  const M_exp = fitExp(x,y);
-  const M_log = fitLog(x,y);
-  const models = [M_lin, M_quad, M_exp, M_log];
-  const best = models.reduce((acc,m) => (m.r2 > (acc.r2 ?? -Infinity) ? m : acc), {r2:-Infinity});
+  // определяем переменные и формулу
+  let symbols={x:'x',y:'y'};
+  let theoryY=[], theoryText='', empFormula='', compareText='';
 
-  // Update UI: empirical model
-  document.getElementById('bestModelName').textContent = 'Эмпирическая модель: ' + (best.type === 'linear' ? 'Линейная' : best.type==='quad' ? 'Квадратичная' : best.type==='exp' ? 'Экспоненциальная' : 'Логарифмическая');
-  document.getElementById('bestModelFormulaText').textContent = prettyFormula(best);
-  document.getElementById('pillR2').textContent = 'R² = ' + (isFinite(best.r2) ? best.r2.toFixed(4) : '—');
-
-  // Theoretical model (built-in) or user-provided
-  let theoryInfo = null;
-  if(userFormula !== ''){
-    // Try to evaluate user's formula for the given x values. The user should provide a numeric formula in x.
-    // Example: y = 2*x^2 + 3*x + 1  -> we parse right-hand side (after '=' if present)
-    let expr = userFormula;
-    if(userFormula.includes('=')){
-      expr = userFormula.split('=').slice(1).join('=');
-    }
-    expr = expr.trim();
-    try {
-      const node = math.parse(expr);
-      const code = node.compile();
-      const yuser = x.map(xx => {
-        const scope = {x: xx};
-        return Number(code.evaluate(scope));
-      });
-      const err = meanRelativeErrorPercent(y, yuser);
-      const r2u = r2score(y, yuser);
-      const latex = '\\text{Пользовательская формула}';
-      theoryInfo = {ytheory:yuser, paramName:'user', paramValue:null, latex, err, r2:r2u, label:'Пользовательская формула'};
-    } catch(e){
-      alert('Не удалось разобрать пользовательскую формулу. Используйте допустимые выражения, например: y = 2*x^2 + 3*x + 1');
-      return;
-    }
+  if(mode==='ohm'){
+    symbols={x:'U',y:'I'};
+    const R=Math.abs(1/a);
+    theoryY=x.map(u=>u/R);
+    theoryText=`I = U / R, оценка R ≈ ${R.toFixed(3)} Ω`;
+    empFormula=`I = ${a.toFixed(3)}·U ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+  } else if(mode==='pendulum'){
+    symbols={x:'L',y:'T'};
+    const g=Math.abs(4*Math.PI**2*a);
+    theoryY=x.map(L=>2*Math.PI*Math.sqrt(L/g));
+    theoryText=`T = 2π√(L/g), оценка g ≈ ${g.toFixed(2)} м/с²`;
+    empFormula=`T = ${a.toFixed(3)}·L ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+  } else if(mode==='fall'){
+    symbols={x:'t',y:'h'};
+    const g=Math.abs(2*a);
+    theoryY=x.map(t=>0.5*g*t**2);
+    theoryText=`h = ½·g·t², оценка g ≈ ${g.toFixed(2)} м/с²`;
+    empFormula=`h = ${a.toFixed(3)}·t ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
   } else {
-    const fitT = fitTheoryForMode(mode, x, y);
-    if(fitT){
-      const err = meanRelativeErrorPercent(y, fitT.ytheory);
-      const r2t = r2score(y, fitT.ytheory);
-      theoryInfo = {ytheory:fitT.ytheory, paramName:fitT.paramName, paramValue:fitT.paramValue, latex:fitT.latex, err, r2:r2t, label:'Теоретическая модель'};
-    }
+    empFormula=`y = ${a.toFixed(3)}·x ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
   }
 
-  // compute error between empirical best and theory
-  let errorText = '—';
-  if(theoryInfo){
-    const err = meanRelativeErrorPercent(y, theoryInfo.ytheory);
-    document.getElementById('pillError').textContent = 'Δ% = ' + (isFinite(err)? err.toFixed(3) + '%' : '—');
-    // render latex for theory
-    document.getElementById('theoryLatex').innerHTML = theoryInfo.latex || '';
-    MathJax.typesetPromise && MathJax.typesetPromise();
-  } else {
-    document.getElementById('pillError').textContent = 'Δ% —';
-    document.getElementById('theoryLatex').innerHTML = '';
-  }
+  // погрешность
+  const avgError = theoryY.length ? err(y, theoryY) : null;
+
+  // график
+  Plotly.newPlot('plot',[
+    {x,y,mode:'markers',name:'Эксперимент'},
+    {x,y:y_pred,mode:'lines',name:'Эмпирическая'},
+    theoryY.length?{x,y:theoryY,mode:'lines',name:'Теоретическая',line:{dash:'dot'}}:null
+  ].filter(Boolean),{
+    title:`Сравнение экспериментальных и теоретических данных (${symbols.y} от ${symbols.x})`,
+    margin:{t:40}
+  });
+
+  // вывод текста
+  document.getElementById('bestModelName').textContent='Эмпирическая модель';
+  document.getElementById('bestModelFormulaText').textContent=empFormula;
+  document.getElementById('theoryLatex').innerText=theoryText;
+  document.getElementById('pillR2').textContent='R² = '+r2val.toFixed(4);
+  document.getElementById('pillError').textContent='Δ% = '+(avgError?avgError.toFixed(2):'—');
+  document.getElementById('modelDetails').innerText=`Средняя относительная погрешность: ${(avgError?avgError.toFixed(2):'—')}%`;
+}
+
 
   // Update details
   const det = document.getElementById('modelDetails');
@@ -575,4 +566,5 @@ loadExample();
 </script>
 </body>
 </html>
+
 
