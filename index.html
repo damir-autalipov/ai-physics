@@ -1,12 +1,5 @@
 <!DOCTYPE html>
 <html lang="ru">
-<script>
-window.MathJax = {
-  tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
-  svg: { fontCache: 'global' }
-};
-</script>
-<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -309,39 +302,39 @@ function prettyFormula(obj){
 
 function fitTheoryForMode(mode, x, y){
   if(mode==='ohm'){
-    // Закон Ома: I = U / R
-    const M = fitLinear(x,y); 
+    // Theory: I = U / R  -> I = (1/R)*U  -> linear through origin ideally: I ~ a*U  where a = 1/R
+    // Fit linear with intercept (in case small offset)
+    const M = fitLinear(x,y); // I = a*U + b
     const a = M.coeffs[0];
     const b = M.coeffs[1];
-    const R = Math.abs(a) > 1e-12 ? Math.abs(1 / a) : Infinity;
-    const ytheory = x.map(u => u / R);
-    const latex = `I = \\frac{U}{R},\\; R_{\\text{оценка}} \\approx ${isFinite(R)?R.toFixed(3):'∞'}\\,\\Omega`;
+    const R = Math.abs(a) > 1e-12 ? 1 / a : Infinity;
+    const ytheory = x.map(xi => a*xi + b);
+    const latex = `I = \\dfrac{U}{R},\\ \\text{оценка } R \\approx ${isFinite(R)?R.toFixed(4):'∞'}`;
     return {ytheory, paramName:'R', paramValue:R, latex};
   } else if(mode==='pendulum'){
-    // Маятник: T = 2π√(L/g)
+    // Theory: T = 2π sqrt(L/g)  => T^2 = (4π^2 / g) * L
     const T2 = y.map(yi => yi*yi);
-    const M = fitLinear(x, T2); 
+    const M = fitLinear(x, T2); // T2 = s * L + b
     const s = M.coeffs[0];
     const b = M.coeffs[1];
-    const g = Math.abs(s) > 1e-12 ? Math.abs((4*Math.PI*Math.PI) / s) : Infinity;
-    const ytheory = x.map(L => 2*Math.PI*Math.sqrt(L / g));
-    const latex = `T = 2\\pi\\sqrt{\\frac{L}{g}},\\; g_{\\text{оценка}} \\approx ${isFinite(g)?g.toFixed(3):'—'}\\,м/с^2`;
+    const g = Math.abs(s) > 1e-12 ? (4*Math.PI*Math.PI) / s : Infinity;
+    const ytheory = x.map(xi => Math.sqrt(( (s*xi + b) ) )); // sqrt(s*L + b) approximate T (if b small)
+    const latex = `T = 2\\pi\\sqrt{\\dfrac{L}{g}},\\ \\text{оценка } g \\approx ${isFinite(g)?g.toFixed(4):'—'}`;
     return {ytheory, paramName:'g', paramValue:g, latex};
   } else if(mode==='fall'){
-    // Падение: h = ½ g t²
+    // Theory: h = 1/2 g t^2 -> linear fit h vs t^2
     const t2 = x.map(xi => xi*xi);
-    const M = fitLinear(t2, y); 
+    const M = fitLinear(t2, y); // h = s * t2 + b
     const s = M.coeffs[0];
     const b = M.coeffs[1];
-    const g = Math.abs(2 * s);
-    const ytheory = x.map(t => 0.5 * g * t * t);
-    const latex = `h = \\frac{1}{2}gt^{2},\\; g_{\\text{оценка}} \\approx ${isFinite(g)?g.toFixed(3):'—'}\\,м/с^2`;
+    const g = 2 * s;
+    const ytheory = x.map(xi => s * xi*xi + b);
+    const latex = `h = \\tfrac{1}{2} g t^{2},\\ \\text{оценка } g \\approx ${isFinite(g)?g.toFixed(4):'—'}`;
     return {ytheory, paramName:'g', paramValue:g, latex};
   } else {
     return null;
   }
 }
-
 
 /* -----------------------------
    Event handlers: CSV, example, analyze
@@ -394,99 +387,75 @@ function loadExample(){
    Main analyze function
    ----------------------------- */
 
-function runAnalysis(){
+function runAnalysis(showAllModels=false){
   const A = parseSeries(document.getElementById('inputA').value);
   const B = parseSeries(document.getElementById('inputB').value);
-  if(A.length !== B.length || A.length < 2){
-    alert('Введите одинаковое количество точек (минимум две)');
-    return;
+  const userFormula = document.getElementById('userFormula').value.trim();
+  if(A.length === 0 || B.length === 0) { alert('Введите оба ряда данных.'); return; }
+  if(A.length !== B.length) { alert('Длины рядов должны совпадать.'); return; }
+  if(A.length < 2) { alert('Нужно минимум 2 точки.'); return; }
+
+  const x = A.slice(), y = B.slice();
+
+  // Fit candidate models
+  const M_lin = fitLinear(x,y);
+  const M_quad = fitQuad(x,y);
+  const M_exp = fitExp(x,y);
+  const M_log = fitLog(x,y);
+  const models = [M_lin, M_quad, M_exp, M_log];
+  const best = models.reduce((acc,m) => (m.r2 > (acc.r2 ?? -Infinity) ? m : acc), {r2:-Infinity});
+
+  // Update UI: empirical model
+  document.getElementById('bestModelName').textContent = 'Эмпирическая модель: ' + (best.type === 'linear' ? 'Линейная' : best.type==='quad' ? 'Квадратичная' : best.type==='exp' ? 'Экспоненциальная' : 'Логарифмическая');
+  document.getElementById('bestModelFormulaText').textContent = prettyFormula(best);
+  document.getElementById('pillR2').textContent = 'R² = ' + (isFinite(best.r2) ? best.r2.toFixed(4) : '—');
+
+  // Theoretical model (built-in) or user-provided
+  let theoryInfo = null;
+  if(userFormula !== ''){
+    // Try to evaluate user's formula for the given x values. The user should provide a numeric formula in x.
+    // Example: y = 2*x^2 + 3*x + 1  -> we parse right-hand side (after '=' if present)
+    let expr = userFormula;
+    if(userFormula.includes('=')){
+      expr = userFormula.split('=').slice(1).join('=');
+    }
+    expr = expr.trim();
+    try {
+      const node = math.parse(expr);
+      const code = node.compile();
+      const yuser = x.map(xx => {
+        const scope = {x: xx};
+        return Number(code.evaluate(scope));
+      });
+      const err = meanRelativeErrorPercent(y, yuser);
+      const r2u = r2score(y, yuser);
+      const latex = '\\text{Пользовательская формула}';
+      theoryInfo = {ytheory:yuser, paramName:'user', paramValue:null, latex, err, r2:r2u, label:'Пользовательская формула'};
+    } catch(e){
+      alert('Не удалось разобрать пользовательскую формулу. Используйте допустимые выражения, например: y = 2*x^2 + 3*x + 1');
+      return;
+    }
+  } else {
+    const fitT = fitTheoryForMode(mode, x, y);
+    if(fitT){
+      const err = meanRelativeErrorPercent(y, fitT.ytheory);
+      const r2t = r2score(y, fitT.ytheory);
+      theoryInfo = {ytheory:fitT.ytheory, paramName:fitT.paramName, paramValue:fitT.paramValue, latex:fitT.latex, err, r2:r2t, label:'Теоретическая модель'};
+    }
   }
 
-  const x = A.slice();
-  const y = B.slice();
-
-  // --- линейная аппроксимация (простая, как для R, g и т.д.)
-  const meanX = math.mean(x);
-  const meanY = math.mean(y);
-  const num = math.sum(x.map((xi,i)=>(xi-meanX)*(y[i]-meanY)));
-  const den = math.sum(x.map(xi=>(xi-meanX)**2));
-  const a = den === 0 ? 0 : num/den;
-  const b = meanY - a*meanX;
-  const y_pred = x.map(xi => a*xi + b);
-
-  // функции для R² и ошибки
-  function r2score(y, ypred){
-    const meanY = math.mean(y);
-    const ssRes = math.sum(y.map((yi,i)=> (yi-ypred[i])**2));
-    const ssTot = math.sum(y.map(yi => (yi-meanY)**2));
-    return ssTot === 0 ? 1 : 1 - ssRes/ssTot;
+  // compute error between empirical best and theory
+  let errorText = '—';
+  if(theoryInfo){
+    const err = meanRelativeErrorPercent(y, theoryInfo.ytheory);
+    document.getElementById('pillError').textContent = 'Δ% = ' + (isFinite(err)? err.toFixed(3) + '%' : '—');
+    // render latex for theory
+    document.getElementById('theoryLatex').innerHTML = theoryInfo.latex || '';
+    MathJax.typesetPromise && MathJax.typesetPromise();
+  } else {
+    document.getElementById('pillError').textContent = 'Δ% —';
+    document.getElementById('theoryLatex').innerHTML = '';
   }
-  function meanRelativeErrorPercent(y, ypred){
-    const eps = 1e-9;
-    const rel = y.map((yi,i)=> Math.abs(yi - ypred[i]) / Math.max(Math.abs(yi), eps));
-    return math.mean(rel) * 100;
-  }
-
-  const r2val = r2score(y, y_pred);
-  let empFormula = '';
-  let theoryY = [];
-  let theoryText = '';
-  let symbols = {x:'x', y:'y'};
-
-  // --- формулы по типу эксперимента ---
-  if(mode === 'ohm'){
-    symbols = {x:'U', y:'I'};
-    const R = Math.abs(1 / a);
-    empFormula = `I = ${a.toFixed(3)}·U ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
-    theoryText = `I = U / R, оценка R ≈ ${R.toFixed(3)} Ω`;
-    theoryY = x.map(U => U / R);
-  }
-  else if(mode === 'pendulum'){
-    symbols = {x:'L', y:'T'};
-    const g = Math.abs((4 * Math.PI ** 2) / a);
-    empFormula = `T² = ${a.toFixed(3)}·L ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
-    theoryText = `T = 2π√(L/g), оценка g ≈ ${g.toFixed(3)} м/с²`;
-    theoryY = x.map(L => 2*Math.PI*Math.sqrt(L/g));
-  }
-  else if(mode === 'fall'){
-    symbols = {x:'t', y:'h'};
-    const g = Math.abs(2 * a);
-    empFormula = `h = ${a.toFixed(3)}·t² ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
-    theoryText = `h = ½·g·t², оценка g ≈ ${g.toFixed(3)} м/с²`;
-    theoryY = x.map(t => 0.5 * g * t * t);
-  }
-  else {
-    empFormula = `y = ${a.toFixed(3)}·x ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
-  }
-
-  const avgError = theoryY.length ? meanRelativeErrorPercent(y, theoryY) : null;
-
-  // --- построение графика ---
-  const traces = [
-    {x, y, mode:'markers', name:'Эксперимент', marker:{size:7}},
-    {x, y:y_pred, mode:'lines', name:'Эмпирическая модель', line:{width:3, color:'#2563eb'}}
-  ];
-
-  if(theoryY.length){
-    traces.push({x, y:theoryY, mode:'lines', name:'Теоретическая модель', line:{width:3, dash:'dot', color:'#f97316'}});
-  }
-
-  Plotly.newPlot('plot', traces, {
-    margin:{t:30, l:60, r:20, b:60},
-    xaxis:{title:symbols.x},
-    yaxis:{title:symbols.y},
-    legend:{orientation:'h'}
-  });
-
-  // --- вывод текста и чисел ---
-  document.getElementById('bestModelName').textContent = 'Эмпирическая модель';
-  document.getElementById('bestModelFormulaText').textContent = empFormula;
-  document.getElementById('theoryLatex').innerText = theoryText;
-  document.getElementById('pillR2').textContent = 'R² = ' + r2val.toFixed(4);
-  document.getElementById('pillError').textContent = 'Δ% = ' + (avgError ? avgError.toFixed(2) + '%' : '—');
-  document.getElementById('modelDetails').innerText = `Средняя относительная погрешность: ${(avgError ? avgError.toFixed(2) : '—')}%`;
-}
-
 
   // Update details
   const det = document.getElementById('modelDetails');
@@ -599,6 +568,3 @@ loadExample();
 </script>
 </body>
 </html>
-
-
-
