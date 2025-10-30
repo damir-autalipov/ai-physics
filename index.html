@@ -148,14 +148,28 @@ document.getElementById('btnAnalyze').onclick=()=>{
   const lg=fitLog(x,y);const ylg=x.map(xi=>lg.a*Math.log(xi)+lg.b);models.push({name:'Логарифмическая',r:r2(y,ylg),f:`${vars.y}=${lg.a.toFixed(4)}·ln(${vars.x})${lg.b>=0?'+':'-'}${Math.abs(lg.b).toFixed(4)}`,y:ylg});
 
   const best=models.reduce((a,b)=>a.r>b.r?a:b);
-  const traces=[{x,y,mode:'markers',name:'Эксперимент'}];
-  models.forEach(m=>traces.push({x,y:m.y,mode:'lines',name:m.name}));
+
+  // Добавляем теоретическую формулу
+  let theory='',ytheory=[];
+  if(mode==='ohm'){const R=Math.abs(1/lin.a);ytheory=x.map(U=>U/R);theory=`I = U / R (R ≈ ${R.toFixed(3)} Ω)`;}
+  else if(mode==='pendulum'){const g=Math.abs((4*Math.PI*Math.PI)/lin.a);ytheory=x.map(L=>2*Math.PI*Math.sqrt(L/g));theory=`T = 2π√(L/g) (g ≈ ${g.toFixed(3)} м/с²)`;}
+  else if(mode==='fall'){const g=Math.abs(2*lin.a);ytheory=x.map(t=>0.5*g*t*t);theory=`h = ½·g·t² (g ≈ ${g.toFixed(3)} м/с²)`;}
+
+  const traces=[{x,y,mode:'markers',name:'Эксперимент',marker:{color:'#2563eb',size:8}}];
+  models.forEach(m=>traces.push({
+    x,y:m.y,mode:'lines',name:m.name,
+    line:{width:m.name===best.name?3:1,dash:m.name===best.name?'solid':'dot',color:m.name===best.name?'#7c3aed':'gray'},
+    opacity:m.name===best.name?1:0.25
+  }));
+  if(ytheory.length) traces.push({x,y:ytheory,mode:'lines',name:'Теоретическая',line:{dash:'dot',color:'#10b981'},opacity:0.9});
+
   Plotly.newPlot('plot',traces,{margin:{t:30,l:60,r:20,b:60},xaxis:{title:vars.x},yaxis:{title:vars.y},legend:{orientation:'h'}});
 
   document.getElementById('bestModelFormula').textContent=`${best.name}: ${best.f}`;
+  document.getElementById('theoryFormula').textContent=theory||'—';
+  document.getElementById('userFormulaOut').textContent=document.getElementById('userFormula').value.trim()||'—';
   document.getElementById('pillR2').textContent='R² = '+best.r.toFixed(4);
   document.getElementById('pillError').textContent='Δ% = '+err(y,best.y).toFixed(2)+'%';
-  document.getElementById('userFormulaOut').textContent=document.getElementById('userFormula').value.trim()||'—';
   document.getElementById('resultTitle').textContent='Анализ завершён';
   document.getElementById('explanation').innerHTML=`ИИ протестировал 5 типов моделей и выбрал <b>${best.name.toLowerCase()}</b>, так как она имеет наибольший R² (${best.r.toFixed(4)}).<br><br>
   <b>Сравнение моделей:</b><br>${models.map(m=>`${m.name}: R²=${m.r.toFixed(4)}`).join('<br>')}<br><br>
