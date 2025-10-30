@@ -45,7 +45,7 @@
 <body>
 <div class="wrap">
   <h1>ИИ — лабораторный помощник</h1>
-  <p>Введите экспериментальные данные — ИИ подберёт лучшую модель зависимости, объяснит выбор и покажет альтернативы.</p>
+  <p>ИИ анализирует экспериментальные данные, подбирает лучшую модель, объясняет выбор и предлагает альтернативы.</p>
 
   <div class="grid" style="margin-top:20px;">
     <!-- Левая панель -->
@@ -92,7 +92,7 @@
     </div>
   </div>
 
-  <footer>ИИ объясняет выбор модели по качеству аппроксимации и физическому смыслу.</footer>
+  <footer>ИИ объясняет выбор модели на основе точности аппроксимации и физического смысла.</footer>
 </div>
 
 <script>
@@ -118,61 +118,12 @@ function meanRelativeErrorPercent(y, ypred){
   return math.mean(rel)*100;
 }
 
-function fitModels(x,y){
+function fitLinear(x,y){
   const meanX=math.mean(x),meanY=math.mean(y);
   const num=math.sum(x.map((xi,i)=>(xi-meanX)*(y[i]-meanY)));
   const den=math.sum(x.map(xi=>(xi-meanX)**2));
   const a=den===0?0:num/den;const b=meanY-a*meanX;
-  const linPred=x.map(xi=>a*xi+b);
-  const r2_lin=r2score(y,linPred);
-
-  // Квадратичная
-  let A=0,B=0,C=0;
-  try{
-    const X=math.matrix(x.map(xi=>[xi*xi,xi,1]));
-    const Y=math.matrix(y);
-    const Xt=math.transpose(X);
-    const XtX=math.multiply(Xt,X);
-    const inv=math.inv(XtX);
-    const XtY=math.multiply(Xt,Y);
-    const theta=math.multiply(inv,XtY).toArray().flat();
-    [A,B,C]=theta;
-  }catch(e){}
-  const quadPred=x.map(xi=>A*xi*xi+B*xi+C);
-  const r2_quad=r2score(y,quadPred);
-
-  // Экспоненциальная
-  let expPred=x.map(()=>0),p0=0,p1=0;
-  if(y.every(v=>v>0)){
-    const lnY=y.map(v=>Math.log(v));
-    const numE=math.sum(x.map((xi,i)=>(xi-meanX)*(lnY[i]-math.mean(lnY))));
-    const denE=math.sum(x.map(xi=>(xi-meanX)**2));
-    p1=denE===0?0:numE/denE;
-    const lnP0=math.mean(lnY)-p1*meanX;
-    p0=Math.exp(lnP0);
-    expPred=x.map(xi=>p0*Math.exp(p1*xi));
-  }
-  const r2_exp=r2score(y,expPred);
-
-  // Логарифмическая
-  let logPred=x.map(()=>0),aL=0,bL=0;
-  if(x.every(v=>v>0)){
-    const lnX=x.map(v=>Math.log(v));
-    const numL=math.sum(lnX.map((xi,i)=>(xi-math.mean(lnX))*(y[i]-meanY)));
-    const denL=math.sum(lnX.map(xi=>(xi-math.mean(lnX))**2));
-    aL=denL===0?0:numL/denL;
-    bL=meanY-aL*math.mean(lnX);
-    logPred=x.map(xi=>aL*Math.log(xi)+bL);
-  }
-  const r2_log=r2score(y,logPred);
-
-  const models=[
-    {name:"Линейная",type:"linear",r2:r2_lin,formula:`y=${a.toFixed(3)}x+${b.toFixed(3)}`,pred:linPred},
-    {name:"Квадратичная",type:"quad",r2:r2_quad,formula:`y=${A.toFixed(3)}x²+${B.toFixed(3)}x+${C.toFixed(3)}`,pred:quadPred},
-    {name:"Экспоненциальная",type:"exp",r2:r2_exp,formula:`y=${p0.toFixed(3)}e^{${p1.toFixed(3)}x}`,pred:expPred},
-    {name:"Логарифмическая",type:"log",r2:r2_log,formula:`y=${aL.toFixed(3)}ln(x)+${bL.toFixed(3)}`,pred:logPred}
-  ];
-  return models;
+  return {a,b};
 }
 
 document.getElementById('btnExample').onclick=()=>{
@@ -186,13 +137,39 @@ document.getElementById('btnAnalyze').onclick=()=>{
   const x=parseSeries(inputA.value),y=parseSeries(inputB.value);
   if(x.length<3||x.length!==y.length){alert("Введите минимум 3 точки одинаковой длины");return;}
 
-  const models=fitModels(x,y);
-  const best=models.reduce((a,b)=>a.r2>b.r2?a:b);
-  const sorted=models.sort((a,b)=>b.r2-a.r2);
+  // --- определяем символы величин ---
+  let symbols={x:'x',y:'y'};
+  if(mode==='ohm') symbols={x:'U',y:'I'};
+  else if(mode==='pendulum') symbols={x:'L',y:'T²'};
+  else if(mode==='fall') symbols={x:'t²',y:'h'};
 
-  const theory=(mode==='ohm'?'I=U/R':'')+(mode==='pendulum'?'T=2π√(L/g)':'')+(mode==='fall'?'h=½gt²':'');
-  const y_theory = x.map(v=>mode==='ohm'?v:mode==='fall'?0.5*9.8*v*v:mode==='pendulum'?2*Math.PI*Math.sqrt(v/9.8):0);
-  const err=meanRelativeErrorPercent(y,y_theory);
+  // --- аппроксимация ---
+  let xCalc=x.slice(), yCalc=y.slice();
+  if(mode==='pendulum') yCalc=y.map(v=>v*v);
+  if(mode==='fall') xCalc=x.map(v=>v*v);
+  const {a,b}=fitLinear(xCalc,yCalc);
+  const y_pred=xCalc.map(xi=>a*xi+b);
+  const r2=r2score(yCalc,y_pred);
+
+  // --- создаём формулу с физическими величинами ---
+  let formula=`${symbols.y} = ${a.toFixed(3)}·${symbols.x} ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+
+  // --- теоретическая модель ---
+  let theory='', y_theory=[];
+  if(mode==='ohm'){
+    const R=Math.abs(1/a);
+    theory=`I = U / R  (R ≈ ${R.toFixed(3)} Ω)`;
+    y_theory=x.map(U=>U/R);
+  } else if(mode==='pendulum'){
+    const g=Math.abs((4*Math.PI**2)/a);
+    theory=`T = 2π√(L/g)  (g ≈ ${g.toFixed(3)} м/с²)`;
+    y_theory=x.map(L=>2*Math.PI*Math.sqrt(L/g));
+  } else if(mode==='fall'){
+    const g=Math.abs(2*a);
+    theory=`h = ½·g·t²  (g ≈ ${g.toFixed(3)} м/с²)`;
+    y_theory=x.map(t=>0.5*g*t*t);
+  }
+  const err=y_theory.length?meanRelativeErrorPercent(y,y_theory):null;
 
   // пользовательская формула
   const userFormula=document.getElementById('userFormula').value.trim();
@@ -208,27 +185,25 @@ document.getElementById('btnAnalyze').onclick=()=>{
     }catch(e){alert('Ошибка в пользовательской формуле');}
   }
 
-  const traces=[{x,y,mode:'markers',name:'Эксперимент',marker:{size:7}}];
-  traces.push({x,y:best.pred,mode:'lines',name:`${best.name} модель`,line:{width:3,color:'#2563eb'}});
-  if(y_theory.some(v=>v!==0))traces.push({x,y:y_theory,mode:'lines',name:'Теоретическая модель',line:{width:3,dash:'dot',color:'#f97316'}});
-  if(y_user.length)traces.push({x,y:y_user,mode:'lines',name:'Пользовательская формула',line:{width:3,dash:'dash',color:'#10b981'}});
-  Plotly.newPlot('plot',traces,{margin:{t:30,l:60,r:20,b:60},legend:{orientation:'h'}});
+  // --- графики ---
+  const traces=[{x,y,mode:'markers',name:'Эксперимент',marker:{size:7}},
+                {x,y:y_pred,mode:'lines',name:'Эмпирическая модель',line:{width:3,color:'#2563eb'}}];
+  if(y_theory.length) traces.push({x,y:y_theory,mode:'lines',name:'Теоретическая модель',line:{width:3,dash:'dot',color:'#f97316'}});
+  if(y_user.length) traces.push({x,y:y_user,mode:'lines',name:'Пользовательская формула',line:{width:3,dash:'dash',color:'#10b981'}});
+  Plotly.newPlot('plot',traces,{margin:{t:30,l:60,r:20,b:60},legend:{orientation:'h'},xaxis:{title:symbols.x},yaxis:{title:symbols.y}});
 
+  // --- вывод ---
   document.getElementById('resultTitle').textContent='Анализ завершён';
-  document.getElementById('empFormula').textContent=`${best.name}: ${best.formula}`;
-  document.getElementById('theoryFormula').textContent=theory || '—';
-  document.getElementById('userFormulaOut').textContent=userFormula || '—';
-  document.getElementById('pillR2').textContent='R² = '+best.r2.toFixed(4);
+  document.getElementById('empFormula').textContent=formula;
+  document.getElementById('theoryFormula').textContent=theory||'—';
+  document.getElementById('userFormulaOut').textContent=userFormula||'—';
+  document.getElementById('pillR2').textContent='R² = '+r2.toFixed(4);
   document.getElementById('pillError').textContent='Δ% = '+(err?err.toFixed(2)+'%':'—');
 
-  let explanation=`ИИ выбрал <b>${best.name.toLowerCase()}</b> модель, так как она показала наилучшее соответствие данным (R²=${best.r2.toFixed(4)}).<br>`;
-  explanation+=`Альтернативы:<br>`;
-  for(const m of sorted){
-    explanation+=`– ${m.name}: R²=${m.r2.toFixed(4)} (${m.formula})<br>`;
-  }
-  if(best.r2<0.9) explanation+=`<br>Ни одна модель не объясняет данные полностью — возможно, зависимость имеет более сложный вид или в данных есть погрешности.`;
-  if(userErr!==null) explanation+=`<br>Пользовательская формула отличается от данных в среднем на ${userErr.toFixed(2)}%.`;
-
+  let explanation=`Модель: линейная зависимость между ${symbols.x} и ${symbols.y}. `;
+  if(r2>0.95) explanation+='Коэффициент детерминации высокий — зависимость хорошо описывается данной моделью.';
+  else explanation+='R² не слишком велик — возможна нелинейность или шум в данных.';
+  if(userErr!==null) explanation+=`<br>Пользовательская формула отклоняется от данных на ${userErr.toFixed(2)}%.`;
   document.getElementById('explanation').innerHTML=explanation;
 };
 </script>
