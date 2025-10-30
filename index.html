@@ -4,10 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ИИ — лабораторный помощник</title>
-
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
-
 <style>
 :root {
   --bg:#f6f7f9;--card:#ffffff;--text:#202124;
@@ -37,19 +35,12 @@ color:white;display:flex;align-items:center;justify-content:center;font-weight:7
 #plot{width:100%;height:420px;}
 .pill{background:#f8fafc;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;}
 footer{color:var(--muted);font-size:12px;margin-top:20px;text-align:center;}
-.tooltip{position:relative;display:inline-block;}
-.tooltiptext{
-visibility:hidden;background-color:#333;color:#fff;text-align:left;border-radius:6px;
-padding:8px 10px;position:absolute;z-index:1;bottom:125%;left:50%;transform:translateX(-50%);
-opacity:0;transition:opacity 0.3s;width:240px;font-size:12px;line-height:1.3;
-}
-.tooltip:hover .tooltiptext{visibility:visible;opacity:1;}
 </style>
 </head>
 <body>
 <div class="wrap">
 <h1>ИИ — лабораторный помощник</h1>
-<p>ИИ анализирует экспериментальные данные, подбирает оптимальную модель и объясняет свой выбор.</p>
+<p>ИИ анализирует экспериментальные данные, подбирает оптимальную модель и сравнивает её с теоретическим законом.</p>
 
 <div class="grid" style="margin-top:20px;">
   <div class="panel">
@@ -78,32 +69,23 @@ opacity:0;transition:opacity 0.3s;width:240px;font-size:12px;line-height:1.3;
         <strong id="resultTitle">Готов к анализу</strong><br>
         <span id="resultSub" style="color:var(--muted);font-size:13px;">Введите данные и нажмите «Анализировать»</span>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <div class="tooltip">
-          <div class="pill" id="pillR2">R² —</div>
-          <span class="tooltiptext">Коэффициент детерминации: показывает, насколько точно модель описывает данные (1 = идеально)</span>
-        </div>
-        <div class="tooltip">
-          <div class="pill" id="pillError">Δ% —</div>
-          <span class="tooltiptext">Средняя относительная погрешность между моделью и экспериментом</span>
-        </div>
+      <div style="display:flex;gap:8px;">
+        <div class="pill" id="pillR2">R² —</div>
+        <div class="pill" id="pillError">Δ% —</div>
       </div>
     </div>
 
     <div id="plot"></div>
     <div style="margin-top:12px;">
-      <div class="tooltip">
-        <b>Лучшая модель:</b> <span id="bestModelFormula">—</span>
-        <span class="tooltiptext">Выбрана по наибольшему R² и физическому смыслу зависимости</span>
-      </div><br>
+      <b>Эмпирическая модель:</b> <span id="bestModelFormula">—</span><br>
       <b>Теоретическая модель:</b> <span id="theoryFormula">—</span><br>
-      <b>Пользовательская формула:</b> <span id="userFormulaOut">—</span>
-      <div id="explanation" style="margin-top:10px;color:var(--muted);font-size:13px;"></div>
+      <b>Пояснение:</b>
+      <div id="explanation" style="margin-top:6px;color:var(--muted);font-size:13px;"></div>
     </div>
   </div>
 </div>
 
-<footer>ИИ использует статистический анализ и сравнение моделей, чтобы подобрать физически осмысленную зависимость.</footer>
+<footer>Разработано для учебных лабораторных работ с ИИ</footer>
 </div>
 
 <script>
@@ -120,9 +102,6 @@ function r2(y,yp){const m=math.mean(y);const ssr=math.sum(y.map((yi,i)=>(yi-yp[i
 function err(y,yp){const eps=1e-9;return math.mean(y.map((yi,i)=>Math.abs(yi-yp[i])/Math.max(Math.abs(yi),eps)))*100;}
 function fitLinear(x,y){const mx=math.mean(x),my=math.mean(y);const a=math.sum(x.map((xi,i)=>(xi-mx)*(y[i]-my)))/math.sum(x.map(xi=>(xi-mx)**2));return {a:a,b:my-a*mx};}
 function fitQuad(x,y){try{const X=math.matrix(x.map(xi=>[xi*xi,xi,1]));const Y=math.matrix(y);const t=math.multiply(math.inv(math.multiply(math.transpose(X),X)),math.multiply(math.transpose(X),Y)).toArray().flat();return {A:t[0],B:t[1],C:t[2]};}catch(e){return{A:0,B:0,C:0};}}
-function fitPower(x,y){const lx=x.map(xi=>Math.log(xi)),ly=y.map(yi=>Math.log(yi));const lin=fitLinear(lx,ly);return {a:Math.exp(lin.b),b:lin.a};}
-function fitExp(x,y){const ly=y.map(yi=>Math.log(yi));const lin=fitLinear(x,ly);return {a:Math.exp(lin.b),b:lin.a};}
-function fitLog(x,y){const lx=x.map(xi=>Math.log(xi));const lin=fitLinear(lx,y);return {a:lin.a,b:lin.b};}
 
 document.getElementById('btnExample').onclick=()=>{
   if(mode==='ohm'){inputA.value='1,2,3,4';inputB.value='1,0.5,0.33,0.25';}
@@ -140,40 +119,56 @@ document.getElementById('btnAnalyze').onclick=()=>{
   else if(mode==='pendulum') vars={x:'L',y:'T'};
   else if(mode==='fall') vars={x:'t',y:'h'};
 
-  const models=[];
-  const lin=fitLinear(x,y);const ylin=x.map(xi=>lin.a*xi+lin.b);models.push({name:'Линейная',r:r2(y,ylin),f:`${vars.y}=${lin.a.toFixed(4)}·${vars.x}${lin.b>=0?'+':'-'}${Math.abs(lin.b).toFixed(4)}`,y:ylin});
-  const q=fitQuad(x,y);const yq=x.map(xi=>q.A*xi*xi+q.B*xi+q.C);models.push({name:'Квадратичная',r:r2(y,yq),f:`${vars.y}=${q.A.toFixed(4)}·${vars.x}²${q.B>=0?'+':'-'}${Math.abs(q.B).toFixed(4)}·${vars.x}${q.C>=0?'+':'-'}${Math.abs(q.C).toFixed(4)}`,y:yq});
-  const pw=fitPower(x,y);const ypw=x.map(xi=>pw.a*Math.pow(xi,pw.b));models.push({name:'Степенная',r:r2(y,ypw),f:`${vars.y}=${pw.a.toFixed(4)}·${vars.x}^${pw.b.toFixed(4)}`,y:ypw});
-  const ex=fitExp(x,y);const yex=x.map(xi=>ex.a*Math.exp(ex.b*xi));models.push({name:'Экспоненциальная',r:r2(y,yex),f:`${vars.y}=${ex.a.toFixed(4)}·e^{${ex.b.toFixed(4)}·${vars.x}}`,y:yex});
-  const lg=fitLog(x,y);const ylg=x.map(xi=>lg.a*Math.log(xi)+lg.b);models.push({name:'Логарифмическая',r:r2(y,ylg),f:`${vars.y}=${lg.a.toFixed(4)}·ln(${vars.x})${lg.b>=0?'+':'-'}${Math.abs(lg.b).toFixed(4)}`,y:ylg});
+  // Эмпирические модели
+  const lin=fitLinear(x,y);
+  const ylin=x.map(xi=>lin.a*xi+lin.b);
+  const q=fitQuad(x,y);
+  const yq=x.map(xi=>q.A*xi*xi+q.B*xi+q.C);
 
-  const best=models.reduce((a,b)=>a.r>b.r?a:b);
+  const rlin=r2(y,ylin), rq=r2(y,yq);
+  const best=(rlin>=rq)?{type:'linear',f:`${vars.y}=${lin.a.toFixed(4)}·${vars.x}${lin.b>=0?'+':'-'}${Math.abs(lin.b).toFixed(4)}`,y:ylin,r:rlin}:{type:'quad',f:`${vars.y}=${q.A.toFixed(4)}·${vars.x}²${q.B>=0?'+':'-'}${Math.abs(q.B).toFixed(4)}·${vars.x}${q.C>=0?'+':'-'}${Math.abs(q.C).toFixed(4)}`,y:yq,r:rq};
 
-  // Добавляем теоретическую формулу
+  // Теоретическая модель
   let theory='',ytheory=[];
-  if(mode==='ohm'){const R=Math.abs(1/lin.a);ytheory=x.map(U=>U/R);theory=`I = U / R (R ≈ ${R.toFixed(3)} Ω)`;}
-  else if(mode==='pendulum'){const g=Math.abs((4*Math.PI*Math.PI)/lin.a);ytheory=x.map(L=>2*Math.PI*Math.sqrt(L/g));theory=`T = 2π√(L/g) (g ≈ ${g.toFixed(3)} м/с²)`;}
-  else if(mode==='fall'){const g=Math.abs(2*lin.a);ytheory=x.map(t=>0.5*g*t*t);theory=`h = ½·g·t² (g ≈ ${g.toFixed(3)} м/с²)`;}
+  if(mode==='ohm'){
+    const R=1/lin.a;
+    ytheory=x.map(U=>U/R);
+    theory=`I = U / R, R ≈ ${R.toFixed(3)} Ω`;
+  }
+  else if(mode==='pendulum'){
+    const T2=y.map(t=>t*t);
+    const lin2=fitLinear(x,T2);
+    const s=lin2.a;
+    const g=(4*Math.PI*Math.PI)/s;
+    ytheory=x.map(L=>2*Math.PI*Math.sqrt(L/g));
+    theory=`T = 2π√(L/g), g ≈ ${g.toFixed(3)} м/с²`;
+  }
+  else if(mode==='fall'){
+    const t2=x.map(t=>t*t);
+    const lin2=fitLinear(t2,y);
+    const s=lin2.a;
+    const g=2*s;
+    ytheory=x.map(t=>0.5*g*t*t);
+    theory=`h = ½·g·t², g ≈ ${g.toFixed(3)} м/с²`;
+  }
 
-  const traces=[{x,y,mode:'markers',name:'Эксперимент',marker:{color:'#2563eb',size:8}}];
-  models.forEach(m=>traces.push({
-    x,y:m.y,mode:'lines',name:m.name,
-    line:{width:m.name===best.name?3:1,dash:m.name===best.name?'solid':'dot',color:m.name===best.name?'#7c3aed':'gray'},
-    opacity:m.name===best.name?1:0.25
-  }));
-  if(ytheory.length) traces.push({x,y:ytheory,mode:'lines',name:'Теоретическая',line:{dash:'dot',color:'#10b981'},opacity:0.9});
+  // График: только эксперимент, лучшая модель и теория
+  const traces=[
+    {x,y,mode:'markers',name:'Эксперимент',marker:{color:'#2563eb',size:8}},
+    {x,y:best.y,mode:'lines',name:'Эмпирическая',line:{color:'#7c3aed',width:3}},
+  ];
+  if(ytheory.length) traces.push({x,y:ytheory,mode:'lines',name:'Теоретическая',line:{color:'#10b981',dash:'dot',width:3}});
 
   Plotly.newPlot('plot',traces,{margin:{t:30,l:60,r:20,b:60},xaxis:{title:vars.x},yaxis:{title:vars.y},legend:{orientation:'h'}});
 
-  document.getElementById('bestModelFormula').textContent=`${best.name}: ${best.f}`;
+  // Вывод информации
+  document.getElementById('bestModelFormula').textContent=best.f;
   document.getElementById('theoryFormula').textContent=theory||'—';
-  document.getElementById('userFormulaOut').textContent=document.getElementById('userFormula').value.trim()||'—';
   document.getElementById('pillR2').textContent='R² = '+best.r.toFixed(4);
   document.getElementById('pillError').textContent='Δ% = '+err(y,best.y).toFixed(2)+'%';
   document.getElementById('resultTitle').textContent='Анализ завершён';
-  document.getElementById('explanation').innerHTML=`ИИ протестировал 5 типов моделей и выбрал <b>${best.name.toLowerCase()}</b>, так как она имеет наибольший R² (${best.r.toFixed(4)}).<br><br>
-  <b>Сравнение моделей:</b><br>${models.map(m=>`${m.name}: R²=${m.r.toFixed(4)}`).join('<br>')}<br><br>
-  Это значит, что зависимость ${vars.y}(${vars.x}) наиболее точно описывается функцией типа ${best.name.toLowerCase()}.`;
+  document.getElementById('explanation').innerHTML=`ИИ выбрал <b>${best.type==='linear'?'линейную':'квадратичную'}</b> модель, так как она имеет наибольший R² (${best.r.toFixed(4)}). 
+  <br>Сравнение с теорией показывает, что отклонение составляет ${err(ytheory.length?y:y,best.y).toFixed(2)}%.`;
 };
 </script>
 </body>
