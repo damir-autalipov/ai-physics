@@ -12,7 +12,7 @@
   :root {
     --bg:#f5f6f8; --card:#ffffff; --text:#202124;
     --muted:#6b7280; --border:#dcdfe3;
-    --accent:#2563eb; --accent2:#7c3aed;
+    --accent:#2563eb;
   }
   * { box-sizing:border-box; margin:0; padding:0; }
   body {
@@ -45,7 +45,7 @@
 <body>
 <div class="wrap">
   <h1>ИИ — лабораторный помощник</h1>
-  <p>ИИ анализирует экспериментальные данные, подбирает лучшую модель, объясняет выбор и предлагает альтернативы.</p>
+  <p>Введите экспериментальные данные, и ИИ подберёт подходящую модель, объяснит выбор и предложит альтернативы.</p>
 
   <div class="grid" style="margin-top:20px;">
     <!-- Левая панель -->
@@ -92,7 +92,7 @@
     </div>
   </div>
 
-  <footer>ИИ объясняет выбор модели на основе точности аппроксимации и физического смысла.</footer>
+  <footer>ИИ объясняет выбор модели по точности и физическому смыслу.</footer>
 </div>
 
 <script>
@@ -117,7 +117,6 @@ function meanRelativeErrorPercent(y, ypred){
   const rel=y.map((yi,i)=>Math.abs(yi-ypred[i])/Math.max(Math.abs(yi),eps));
   return math.mean(rel)*100;
 }
-
 function fitLinear(x,y){
   const meanX=math.mean(x),meanY=math.mean(y);
   const num=math.sum(x.map((xi,i)=>(xi-meanX)*(y[i]-meanY)));
@@ -137,24 +136,25 @@ document.getElementById('btnAnalyze').onclick=()=>{
   const x=parseSeries(inputA.value),y=parseSeries(inputB.value);
   if(x.length<3||x.length!==y.length){alert("Введите минимум 3 точки одинаковой длины");return;}
 
-  // --- определяем символы величин ---
-  let symbols={x:'x',y:'y'};
-  if(mode==='ohm') symbols={x:'U',y:'I'};
-  else if(mode==='pendulum') symbols={x:'L',y:'T²'};
-  else if(mode==='fall') symbols={x:'t²',y:'h'};
+  // Определяем величины
+  let vars={x:'x',y:'y'};
+  if(mode==='ohm') vars={x:'U',y:'I'};
+  else if(mode==='pendulum') vars={x:'L',y:'T²'};
+  else if(mode==='fall') vars={x:'t²',y:'h'};
 
-  // --- аппроксимация ---
+  // Для маятника и падения преобразуем оси
   let xCalc=x.slice(), yCalc=y.slice();
   if(mode==='pendulum') yCalc=y.map(v=>v*v);
   if(mode==='fall') xCalc=x.map(v=>v*v);
+
   const {a,b}=fitLinear(xCalc,yCalc);
   const y_pred=xCalc.map(xi=>a*xi+b);
   const r2=r2score(yCalc,y_pred);
 
-  // --- создаём формулу с физическими величинами ---
-  let formula=`${symbols.y} = ${a.toFixed(3)}·${symbols.x} ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+  // Формула в физических переменных
+  let formula=`${vars.y} = ${a.toFixed(3)}·${vars.x} ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
 
-  // --- теоретическая модель ---
+  // Теоретическая модель
   let theory='', y_theory=[];
   if(mode==='ohm'){
     const R=Math.abs(1/a);
@@ -171,40 +171,21 @@ document.getElementById('btnAnalyze').onclick=()=>{
   }
   const err=y_theory.length?meanRelativeErrorPercent(y,y_theory):null;
 
-  // пользовательская формула
-  const userFormula=document.getElementById('userFormula').value.trim();
-  let y_user=[],userErr=null;
-  if(userFormula){
-    let expr=userFormula;
-    if(expr.includes('='))expr=expr.split('=').slice(1).join('=');
-    try{
-      const node=math.parse(expr);
-      const code=node.compile();
-      y_user=x.map(v=>Number(code.evaluate({x:v})));
-      userErr=meanRelativeErrorPercent(y,y_user);
-    }catch(e){alert('Ошибка в пользовательской формуле');}
-  }
-
-  // --- графики ---
+  // Графики
   const traces=[{x,y,mode:'markers',name:'Эксперимент',marker:{size:7}},
                 {x,y:y_pred,mode:'lines',name:'Эмпирическая модель',line:{width:3,color:'#2563eb'}}];
   if(y_theory.length) traces.push({x,y:y_theory,mode:'lines',name:'Теоретическая модель',line:{width:3,dash:'dot',color:'#f97316'}});
-  if(y_user.length) traces.push({x,y:y_user,mode:'lines',name:'Пользовательская формула',line:{width:3,dash:'dash',color:'#10b981'}});
-  Plotly.newPlot('plot',traces,{margin:{t:30,l:60,r:20,b:60},legend:{orientation:'h'},xaxis:{title:symbols.x},yaxis:{title:symbols.y}});
+  Plotly.newPlot('plot',traces,{margin:{t:30,l:60,r:20,b:60},xaxis:{title:vars.x},yaxis:{title:vars.y},legend:{orientation:'h'}});
 
-  // --- вывод ---
+  // Вывод
   document.getElementById('resultTitle').textContent='Анализ завершён';
   document.getElementById('empFormula').textContent=formula;
   document.getElementById('theoryFormula').textContent=theory||'—';
-  document.getElementById('userFormulaOut').textContent=userFormula||'—';
+  document.getElementById('userFormulaOut').textContent=document.getElementById('userFormula').value.trim()||'—';
   document.getElementById('pillR2').textContent='R² = '+r2.toFixed(4);
   document.getElementById('pillError').textContent='Δ% = '+(err?err.toFixed(2)+'%':'—');
-
-  let explanation=`Модель: линейная зависимость между ${symbols.x} и ${symbols.y}. `;
-  if(r2>0.95) explanation+='Коэффициент детерминации высокий — зависимость хорошо описывается данной моделью.';
-  else explanation+='R² не слишком велик — возможна нелинейность или шум в данных.';
-  if(userErr!==null) explanation+=`<br>Пользовательская формула отклоняется от данных на ${userErr.toFixed(2)}%.`;
-  document.getElementById('explanation').innerHTML=explanation;
+  document.getElementById('explanation').innerHTML=`ИИ использовал линейную аппроксимацию между величинами ${vars.x} и ${vars.y}. 
+  Полученная формула выражает зависимость в физических переменных, а не в x и y.`;
 };
 </script>
 </body>
