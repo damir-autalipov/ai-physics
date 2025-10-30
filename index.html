@@ -10,24 +10,25 @@
 
 <style>
   :root {
-    --bg:#f5f6f8; --card:#ffffff; --text:#202124;
+    --bg:#f6f7f9; --card:#ffffff; --text:#202124;
     --muted:#6b7280; --border:#dcdfe3;
-    --accent:#2563eb;
+    --accent:#2563eb; --accent2:#7c3aed;
   }
-  * { box-sizing:border-box; margin:0; padding:0; }
+  * {box-sizing:border-box; margin:0; padding:0;}
   body {
     font-family:"Segoe UI",Roboto,Arial,sans-serif;
     background:var(--bg); color:var(--text);
-    display:flex; justify-content:center; padding:40px;
+    display:flex; justify-content:center;
+    padding:40px;
   }
   .wrap{width:100%;max-width:1200px;}
   h1{font-size:24px;margin-bottom:8px;}
   p{color:var(--muted);font-size:14px;}
   .grid{display:grid;grid-template-columns:360px 1fr;gap:18px;}
-  .panel{background:var(--card);border:1px solid var(--border);border-radius:10px;
-    padding:18px;box-shadow:0 4px 10px rgba(0,0,0,0.04);}
+  .panel{background:var(--card);border:1px solid var(--border);
+    border-radius:10px;padding:18px;box-shadow:0 4px 10px rgba(0,0,0,0.04);}
   textarea,input[type="text"]{width:100%;border:1px solid var(--border);
-    border-radius:8px;padding:8px;margin-top:6px;font-size:14px;}
+    border-radius:8px;padding:8px;margin-top:6px;font-size:14px;background:#fff;}
   label{font-weight:600;font-size:14px;margin-top:10px;display:block;}
   button{background:var(--accent);color:white;border:none;border-radius:8px;
     padding:10px 12px;font-weight:600;cursor:pointer;margin-top:12px;}
@@ -84,15 +85,15 @@
 
       <div id="plot"></div>
       <div style="margin-top:12px;">
-        <div><b>Лучшая модель:</b> <span id="empFormula">—</span></div>
+        <div><b>Лучшая модель:</b> <span id="bestModelFormula">—</span></div>
         <div><b>Теоретическая модель:</b> <span id="theoryFormula">—</span></div>
         <div><b>Пользовательская формула:</b> <span id="userFormulaOut">—</span></div>
-        <div style="margin-top:10px;color:var(--muted);font-size:13px;" id="explanation"></div>
+        <div id="explanation" style="margin-top:10px;color:var(--muted);font-size:13px;"></div>
       </div>
     </div>
   </div>
 
-  <footer>ИИ объясняет выбор модели по точности и физическому смыслу.</footer>
+  <footer>ИИ объясняет выбор модели по качеству аппроксимации и физическому смыслу.</footer>
 </div>
 
 <script>
@@ -100,30 +101,15 @@ let mode='custom';
 document.querySelectorAll('.exp-card').forEach(c=>{
   c.addEventListener('click',()=>{
     document.querySelectorAll('.exp-card').forEach(x=>x.classList.remove('active'));
-    c.classList.add('active');
-    mode=c.dataset.mode;
+    c.classList.add('active'); mode=c.dataset.mode;
   });
 });
 
 function parseSeries(str){return str.split(/,|;|\s+/).map(s=>parseFloat(s)).filter(x=>!isNaN(x));}
-function r2score(y, ypred){
-  const meanY=math.mean(y);
-  const ssRes=math.sum(y.map((yi,i)=>(yi-ypred[i])**2));
-  const ssTot=math.sum(y.map(yi=>(yi-meanY)**2));
-  return ssTot===0?1:1-ssRes/ssTot;
-}
-function meanRelativeErrorPercent(y, ypred){
-  const eps=1e-9;
-  const rel=y.map((yi,i)=>Math.abs(yi-ypred[i])/Math.max(Math.abs(yi),eps));
-  return math.mean(rel)*100;
-}
-function fitLinear(x,y){
-  const meanX=math.mean(x),meanY=math.mean(y);
-  const num=math.sum(x.map((xi,i)=>(xi-meanX)*(y[i]-meanY)));
-  const den=math.sum(x.map(xi=>(xi-meanX)**2));
-  const a=den===0?0:num/den;const b=meanY-a*meanX;
-  return {a,b};
-}
+function r2(y,yp){const mean=math.mean(y);const ssRes=math.sum(y.map((yi,i)=>(yi-yp[i])**2));const ssTot=math.sum(y.map(yi=>(yi-mean)**2));return 1-ssRes/ssTot;}
+function err(y,yp){const eps=1e-9;return math.mean(y.map((yi,i)=>Math.abs(yi-yp[i])/Math.max(Math.abs(yi),eps)))*100;}
+function fitLinear(x,y){const mx=math.mean(x),my=math.mean(y);const a=math.sum(x.map((xi,i)=>(xi-mx)*(y[i]-my)))/math.sum(x.map(xi=>(xi-mx)**2));return {a:a,b:my-a*mx};}
+function fitQuad(x,y){try{const X=math.matrix(x.map(xi=>[xi*xi,xi,1]));const Y=math.matrix(y);const theta=math.multiply(math.inv(math.multiply(math.transpose(X),X)),math.multiply(math.transpose(X),Y)).toArray().flat();return {A:theta[0],B:theta[1],C:theta[2]};}catch(e){return{A:0,B:0,C:0};}}
 
 document.getElementById('btnExample').onclick=()=>{
   if(mode==='ohm'){inputA.value='1,2,3,4';inputB.value='1,0.5,0.33,0.25';}
@@ -134,58 +120,53 @@ document.getElementById('btnExample').onclick=()=>{
 
 document.getElementById('btnAnalyze').onclick=()=>{
   const x=parseSeries(inputA.value),y=parseSeries(inputB.value);
-  if(x.length<3||x.length!==y.length){alert("Введите минимум 3 точки одинаковой длины");return;}
+  if(x.length<3||x.length!==y.length){alert('Введите одинаковое количество точек');return;}
 
-  // Определяем величины
+  // выбор обозначений
   let vars={x:'x',y:'y'};
   if(mode==='ohm') vars={x:'U',y:'I'};
-  else if(mode==='pendulum') vars={x:'L',y:'T²'};
-  else if(mode==='fall') vars={x:'t²',y:'h'};
+  else if(mode==='pendulum') vars={x:'L',y:'T'};
+  else if(mode==='fall') vars={x:'t',y:'h'};
 
-  // Для маятника и падения преобразуем оси
-  let xCalc=x.slice(), yCalc=y.slice();
-  if(mode==='pendulum') yCalc=y.map(v=>v*v);
-  if(mode==='fall') xCalc=x.map(v=>v*v);
+  // подгон моделей
+  const lin=fitLinear(x,y);const ylin=x.map(xi=>lin.a*xi+lin.b);const rlin=r2(y,ylin);
+  const q=fitQuad(x,y);const yq=x.map(xi=>q.A*xi*xi+q.B*xi+q.C);const rq=r2(y,yq);
 
-  const {a,b}=fitLinear(xCalc,yCalc);
-  const y_pred=xCalc.map(xi=>a*xi+b);
-  const r2=r2score(yCalc,y_pred);
+  // определение лучшей модели
+  const best=rq>rlin?{type:'quad',r:rq,A:q.A,B:q.B,C:q.C}:{type:'linear',r:rlin,a:lin.a,b:lin.b};
+  let formula='';
+  if(best.type==='linear') formula=`${vars.y} = ${best.a.toFixed(4)}·${vars.x} ${best.b>=0?'+':'-'} ${Math.abs(best.b).toFixed(4)}`;
+  else formula=`${vars.y} = ${best.A.toFixed(4)}·${vars.x}² ${best.B>=0?'+':'-'} ${Math.abs(best.B).toFixed(4)}·${vars.x} ${best.C>=0?'+':'-'} ${Math.abs(best.C).toFixed(4)}`;
 
-  // Формула в физических переменных
-  let formula=`${vars.y} = ${a.toFixed(3)}·${vars.x} ${b>=0?'+':'-'} ${Math.abs(b).toFixed(3)}`;
+  // теоретическая
+  let theory='', ytheory=[];
+  if(mode==='ohm'){const R=Math.abs(1/lin.a);ytheory=x.map(U=>U/R);theory=`I = U / R (R ≈ ${R.toFixed(3)} Ω)`;}
+  else if(mode==='pendulum'){const g=Math.abs((4*Math.PI*Math.PI)/lin.a);ytheory=x.map(L=>2*Math.PI*Math.sqrt(L/g));theory=`T = 2π√(L/g) (g ≈ ${g.toFixed(3)} м/с²)`;}
+  else if(mode==='fall'){const g=Math.abs(2*lin.a);ytheory=x.map(t=>0.5*g*t*t);theory=`h = ½·g·t² (g ≈ ${g.toFixed(3)} м/с²)`;}
 
-  // Теоретическая модель
-  let theory='', y_theory=[];
-  if(mode==='ohm'){
-    const R=Math.abs(1/a);
-    theory=`I = U / R  (R ≈ ${R.toFixed(3)} Ω)`;
-    y_theory=x.map(U=>U/R);
-  } else if(mode==='pendulum'){
-    const g=Math.abs((4*Math.PI**2)/a);
-    theory=`T = 2π√(L/g)  (g ≈ ${g.toFixed(3)} м/с²)`;
-    y_theory=x.map(L=>2*Math.PI*Math.sqrt(L/g));
-  } else if(mode==='fall'){
-    const g=Math.abs(2*a);
-    theory=`h = ½·g·t²  (g ≈ ${g.toFixed(3)} м/с²)`;
-    y_theory=x.map(t=>0.5*g*t*t);
-  }
-  const err=y_theory.length?meanRelativeErrorPercent(y,y_theory):null;
+  const e=ytheory.length?err(y,ytheory):null;
 
-  // Графики
-  const traces=[{x,y,mode:'markers',name:'Эксперимент',marker:{size:7}},
-                {x,y:y_pred,mode:'lines',name:'Эмпирическая модель',line:{width:3,color:'#2563eb'}}];
-  if(y_theory.length) traces.push({x,y:y_theory,mode:'lines',name:'Теоретическая модель',line:{width:3,dash:'dot',color:'#f97316'}});
+  // графики
+  const traces=[
+    {x,y,mode:'markers',name:'Эксперимент'},
+    {x,y:ylin,mode:'lines',name:'Линейная модель'},
+    {x,y:yq,mode:'lines',name:'Квадратичная модель'},
+  ];
+  if(ytheory.length) traces.push({x,y:ytheory,mode:'lines',name:'Теоретическая',line:{dash:'dot'}});
   Plotly.newPlot('plot',traces,{margin:{t:30,l:60,r:20,b:60},xaxis:{title:vars.x},yaxis:{title:vars.y},legend:{orientation:'h'}});
 
-  // Вывод
-  document.getElementById('resultTitle').textContent='Анализ завершён';
-  document.getElementById('empFormula').textContent=formula;
+  // вывод
+  document.getElementById('bestModelFormula').textContent=formula;
   document.getElementById('theoryFormula').textContent=theory||'—';
   document.getElementById('userFormulaOut').textContent=document.getElementById('userFormula').value.trim()||'—';
-  document.getElementById('pillR2').textContent='R² = '+r2.toFixed(4);
-  document.getElementById('pillError').textContent='Δ% = '+(err?err.toFixed(2)+'%':'—');
-  document.getElementById('explanation').innerHTML=`ИИ использовал линейную аппроксимацию между величинами ${vars.x} и ${vars.y}. 
-  Полученная формула выражает зависимость в физических переменных, а не в x и y.`;
+  document.getElementById('pillR2').textContent='R² = '+best.r.toFixed(4);
+  document.getElementById('pillError').textContent='Δ% = '+(e?e.toFixed(2)+'%':'—');
+  document.getElementById('resultTitle').textContent='Анализ завершён';
+  document.getElementById('explanation').innerHTML=`ИИ выбрал <b>${best.type==='quad'?'квадратичную':'линейную'}</b> модель, так как она показала наилучшее соответствие экспериментальным данным.<br>
+  Альтернативы:<br>
+  — Линейная: R²=${rlin.toFixed(4)}<br>
+  — Квадратичная: R²=${rq.toFixed(4)}<br>
+  Выбор модели основан на аппроксимации и физическом смысле (${vars.y} зависит от ${vars.x}).`;
 };
 </script>
 </body>
